@@ -121,6 +121,11 @@ impl MpvPlayer {
         Ok(next)
     }
 
+    pub async fn set_paused(&mut self, paused: bool) -> Result<()> {
+        self.send_cmd(json!(["set_property", "pause", paused])).await?;
+        Ok(())
+    }
+
     pub async fn seek_rel(&mut self, delta_secs: f64) -> Result<()> {
         self.send_cmd(json!(["seek", delta_secs, "relative"])).await?;
         Ok(())

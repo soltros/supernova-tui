@@ -337,6 +337,79 @@ impl App {
         })
     }
 
+    pub fn home_favorites(&self) -> &[Track] {
+        if !self.heart_details.tracks.is_empty() {
+            &self.heart_details.tracks
+        } else {
+            &self.dashboard.favorite_tracks
+        }
+    }
+
+    pub fn has_discovery(&self) -> bool {
+        !self.discovery.release_radar.is_empty() || !self.discovery.similar_artists.is_empty()
+    }
+
+    pub fn mpris_state(&self) -> crate::mpris::MprisState {
+        match &self.now_playing {
+            None => crate::mpris::MprisState {
+                playback_status: "Stopped".to_string(),
+                volume: self.tui_config.volume as f64 / 100.0,
+                ..Default::default()
+            },
+            Some(item) => {
+                let status = if self.playback.paused {
+                    "Paused"
+                } else {
+                    "Playing"
+                };
+                let (track_id, album, art_url, dur_s) = match item {
+                    NowPlayingItem::Track(t) => {
+                        let alb = self
+                            .albums
+                            .iter()
+                            .find(|a| a.id == t.album_id)
+                            .map(|a| a.title.clone())
+                            .unwrap_or_default();
+                        let art = if t.album_id.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{}/api/art/album/{}", self.client.base_url, t.album_id)
+                        };
+                        let d = if self.playback.duration > 0.0 {
+                            self.playback.duration
+                        } else {
+                            t.duration_ms as f64 / 1000.0
+                        };
+                        (t.id.clone(), alb, art, d)
+                    }
+                    NowPlayingItem::Podcast { feed_title, episode } => (
+                        format!("pod_{}", episode.id_string()),
+                        feed_title.clone(),
+                        String::new(),
+                        self.playback.duration.max(episode.duration as f64),
+                    ),
+                    NowPlayingItem::Radio { station_id, .. } => (
+                        format!("radio_{station_id}"),
+                        "Internet Radio".to_string(),
+                        String::new(),
+                        0.0,
+                    ),
+                };
+                crate::mpris::MprisState {
+                    playback_status: status.to_string(),
+                    track_id,
+                    title: item.title().to_string(),
+                    artist: item.subtitle(),
+                    album,
+                    art_url,
+                    length_us: (dur_s * 1_000_000.0) as i64,
+                    position_us: (self.playback.time_pos * 1_000_000.0) as i64,
+                    volume: self.tui_config.volume as f64 / 100.0,
+                }
+            }
+        }
+    }
+
     pub async fn init_authenticated(&mut self) {
         match self.client.me().await {
             Ok(u) => {

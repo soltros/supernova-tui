@@ -2,6 +2,7 @@ mod app;
 mod client;
 mod config;
 mod models;
+mod mpris;
 mod player;
 mod ui;
 mod updater;
@@ -12,16 +13,21 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
+use tokio::sync::mpsc;
 
 use crate::app::{App, InputAction, Modal, PreviewKind, Tab};
 use crate::client::SupernovaClient;
 use crate::config::{load_config, save_config};
+use crate::mpris::{MprisCommand, MprisHandle};
 
 #[derive(Parser, Debug)]
 #[command(name = "supernova-tui", version, about = "Ratatui TUI client for Supernova")]
@@ -63,17 +69,24 @@ async fn main() -> Result<()> {
         app.init_authenticated().await;
     }
 
+    let (mpris_tx, mpris_rx) = mpsc::unbounded_channel();
+    let mpris = MprisHandle::start(mpris_tx).await;
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_loop(&mut terminal, &mut app).await;
+    let res = run_loop(&mut terminal, &mut app, &mpris, mpris_rx).await;
 
     app.player.shutdown();
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     res
@@ -82,6 +95,8 @@ async fn main() -> Result<()> {
 async fn run_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
+    mpris: &MprisHandle,
+    mut mpris_rx: mpsc::UnboundedReceiver<MprisCommand>,
 ) -> Result<()> {
     let mut reader = event::EventStream::new();
     let mut ticker = tokio::time::interval(Duration::from_millis(200));
@@ -95,15 +110,74 @@ async fn run_loop<B: ratatui::backend::Backend>(
         tokio::select! {
             _ = ticker.tick() => {
                 app.tick().await;
+                mpris.update(app.mpris_state()).await;
+            }
+            Some(cmd) = mpris_rx.recv() => {
+                handle_mpris_cmd(app, cmd).await;
+                mpris.update(app.mpris_state()).await;
             }
             maybe_ev = reader.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe_ev {
-                    handle_key(app, key).await;
+                match maybe_ev {
+                    Some(Ok(Event::Key(key))) => {
+                        handle_key(app, key).await;
+                        mpris.update(app.mpris_state()).await;
+                    }
+                    Some(Ok(Event::Mouse(me))) => {
+                        match me.kind {
+                            MouseEventKind::ScrollUp => {
+                                handle_key(app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)).await;
+                            }
+                            MouseEventKind::ScrollDown => {
+                                handle_key(app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).await;
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
     Ok(())
+}
+
+async fn handle_mpris_cmd(app: &mut App, cmd: MprisCommand) {
+    match cmd {
+        MprisCommand::Play => {
+            if app.player.set_paused(false).await.is_ok() {
+                app.playback.paused = false;
+            }
+        }
+        MprisCommand::Pause => {
+            if app.player.set_paused(true).await.is_ok() {
+                app.playback.paused = true;
+            }
+        }
+        MprisCommand::PlayPause => {
+            if let Ok(paused) = app.player.toggle_pause().await {
+                app.playback.paused = paused;
+            }
+        }
+        MprisCommand::Stop => {
+            let _ = app.player.stop().await;
+            app.now_playing = None;
+            app.playback.paused = false;
+        }
+        MprisCommand::Next => app.play_next().await,
+        MprisCommand::Previous => app.play_prev().await,
+        MprisCommand::Seek(delta) => {
+            let _ = app.player.seek_rel(delta).await;
+        }
+        MprisCommand::SetPosition(pos) => {
+            let _ = app.player.seek_abs(pos).await;
+        }
+        MprisCommand::SetVolume(vol) => {
+            app.tui_config.volume = vol;
+            let _ = app.player.set_volume(vol).await;
+            app.save_cfg();
+        }
+        MprisCommand::Quit => app.should_quit = true,
+    }
 }
 
 async fn handle_key(app: &mut App, key: KeyEvent) {
@@ -460,19 +534,62 @@ fn move_idx(idx: &mut usize, len: usize, delta: isize) {
 }
 
 async fn handle_dashboard_key(app: &mut App, key: KeyEvent) {
+    let favs_len = app.home_favorites().len();
     let lens = [
         app.dashboard.recently_added_albums.len(),
         app.dashboard.recently_played_tracks.len(),
-        app.dashboard.favorite_tracks.len(),
+        favs_len,
         app.discovery.release_radar.len(),
         app.discovery.similar_artists.len(),
     ];
+    let pane_count = if app.has_discovery() { 5 } else { 3 };
+    if app.dash_pane >= pane_count {
+        app.dash_pane = 0;
+    }
+
     match key.code {
-        KeyCode::Left | KeyCode::Char('h') => app.dash_pane = (app.dash_pane + 4) % 5,
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => app.dash_pane = (app.dash_pane + 1) % 5,
+        KeyCode::Left | KeyCode::Char('h') => app.dash_pane = (app.dash_pane + pane_count - 1) % pane_count,
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => app.dash_pane = (app.dash_pane + 1) % pane_count,
         KeyCode::Up | KeyCode::Char('k') => move_idx(&mut app.dash_sel[app.dash_pane], lens[app.dash_pane], -1),
         KeyCode::Down | KeyCode::Char('j') => move_idx(&mut app.dash_sel[app.dash_pane], lens[app.dash_pane], 1),
+        KeyCode::PageUp => move_idx(&mut app.dash_sel[app.dash_pane], lens[app.dash_pane], -10),
+        KeyCode::PageDown => move_idx(&mut app.dash_sel[app.dash_pane], lens[app.dash_pane], 10),
+        KeyCode::Home | KeyCode::Char('g') => app.dash_sel[app.dash_pane] = 0,
+        KeyCode::End | KeyCode::Char('G') => {
+            app.dash_sel[app.dash_pane] = lens[app.dash_pane].saturating_sub(1);
+        }
         KeyCode::Char('r') => app.refresh_initial().await,
+        KeyCode::Char('f') => {
+            let track_id = match app.dash_pane {
+                1 => app.dashboard.recently_played_tracks.get(app.dash_sel[1]).map(|t| t.id.clone()),
+                2 => app.home_favorites().get(app.dash_sel[2]).map(|t| t.id.clone()),
+                _ => None,
+            };
+            if let Some(id) = track_id {
+                app.toggle_heart("track", &id, None).await;
+            }
+        }
+        KeyCode::Char('q') => {
+            let track = match app.dash_pane {
+                1 => app.dashboard.recently_played_tracks.get(app.dash_sel[1]).cloned(),
+                2 => app.home_favorites().get(app.dash_sel[2]).cloned(),
+                _ => None,
+            };
+            if let Some(t) = track {
+                app.queue.push(t.clone());
+                app.status_msg = format!("Queued '{}'", t.title);
+            }
+        }
+        KeyCode::Char('a') => {
+            let track = match app.dash_pane {
+                1 => app.dashboard.recently_played_tracks.get(app.dash_sel[1]).cloned(),
+                2 => app.home_favorites().get(app.dash_sel[2]).cloned(),
+                _ => None,
+            };
+            if let Some(t) = track {
+                app.modal = Modal::AddToPlaylist { track: t, selected: 0 };
+            }
+        }
         KeyCode::Enter => match app.dash_pane {
             0 => {
                 if let Some(alb) = app.dashboard.recently_added_albums.get(app.dash_sel[0]).cloned() {
@@ -488,7 +605,7 @@ async fn handle_dashboard_key(app: &mut App, key: KeyEvent) {
                 app.play_tracks_from(tracks, app.dash_sel[1]).await;
             }
             2 => {
-                let tracks = app.dashboard.favorite_tracks.clone();
+                let tracks = app.home_favorites().to_vec();
                 app.play_tracks_from(tracks, app.dash_sel[2]).await;
             }
             4 => {

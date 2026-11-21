@@ -103,10 +103,16 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(area);
+    let has_disc = app.has_discovery();
+    let (top_area, bottom_area) = if has_disc {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .split(area);
+        (rows[0], Some(rows[1]))
+    } else {
+        (area, None)
+    };
 
     let top = Layout::default()
         .direction(Direction::Horizontal)
@@ -115,12 +121,7 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Percentage(33),
             Constraint::Percentage(33),
         ])
-        .split(rows[0]);
-
-    let bottom = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(rows[1]);
+        .split(top_area);
 
     let album_items: Vec<ListItem> = app
         .dashboard
@@ -129,7 +130,14 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
         .map(|a| ListItem::new(format!("{} - {} ({})", a.artist_name, a.title, a.release_year)))
         .collect();
     let (l0, mut s0) = list_with_selection(album_items, app.dash_sel[0], app.dash_pane == 0);
-    f.render_stateful_widget(l0.block(pane_block(" Recently Added Albums ", app.dash_pane == 0)), top[0], &mut s0);
+    f.render_stateful_widget(
+        l0.block(pane_block(
+            &format!(" Recently Added Albums ({}) ", app.dashboard.recently_added_albums.len()),
+            app.dash_pane == 0,
+        )),
+        top[0],
+        &mut s0,
+    );
 
     let recent_items: Vec<ListItem> = app
         .dashboard
@@ -138,40 +146,60 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
         .map(|t| ListItem::new(format!("{} - {}", t.artist_name, t.title)))
         .collect();
     let (l1, mut s1) = list_with_selection(recent_items, app.dash_sel[1], app.dash_pane == 1);
-    f.render_stateful_widget(l1.block(pane_block(" Recently Played ", app.dash_pane == 1)), top[1], &mut s1);
+    f.render_stateful_widget(
+        l1.block(pane_block(
+            &format!(" Recently Played ({}) ", app.dashboard.recently_played_tracks.len()),
+            app.dash_pane == 1,
+        )),
+        top[1],
+        &mut s1,
+    );
 
-    let fav_items: Vec<ListItem> = app
-        .dashboard
-        .favorite_tracks
+    let favs = app.home_favorites();
+    let fav_items: Vec<ListItem> = favs
         .iter()
         .map(|t| ListItem::new(format!("♥ {} - {}", t.artist_name, t.title)))
         .collect();
     let (l2, mut s2) = list_with_selection(fav_items, app.dash_sel[2], app.dash_pane == 2);
-    f.render_stateful_widget(l2.block(pane_block(" Favorite Tracks ", app.dash_pane == 2)), top[2], &mut s2);
+    f.render_stateful_widget(
+        l2.block(pane_block(
+            &format!(" Favorite Tracks ({}) ", favs.len()),
+            app.dash_pane == 2,
+        )),
+        top[2],
+        &mut s2,
+    );
 
-    let radar_items: Vec<ListItem> = app
-        .discovery
-        .release_radar
-        .iter()
-        .map(|r| {
-            let date = r.release_date.get(..10).unwrap_or(&r.release_date);
-            ListItem::new(format!("{} - {} ({})", r.artist_name, r.collection_name, date))
-        })
-        .collect();
-    let (l3, mut s3) = list_with_selection(radar_items, app.dash_sel[3], app.dash_pane == 3);
-    f.render_stateful_widget(l3.block(pane_block(" Release Radar (Discovery) ", app.dash_pane == 3)), bottom[0], &mut s3);
+    if let Some(disc_area) = bottom_area {
+        let bottom = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(disc_area);
 
-    let sim_items: Vec<ListItem> = app
-        .discovery
-        .similar_artists
-        .iter()
-        .map(|s| {
-            let mark = if s.id.is_empty() { "" } else { " [in library]" };
-            ListItem::new(format!("{} (like {}){}", s.name, s.based_on, mark))
-        })
-        .collect();
-    let (l4, mut s4) = list_with_selection(sim_items, app.dash_sel[4], app.dash_pane == 4);
-    f.render_stateful_widget(l4.block(pane_block(" Similar Artists ", app.dash_pane == 4)), bottom[1], &mut s4);
+        let radar_items: Vec<ListItem> = app
+            .discovery
+            .release_radar
+            .iter()
+            .map(|r| {
+                let date = r.release_date.get(..10).unwrap_or(&r.release_date);
+                ListItem::new(format!("{} - {} ({})", r.artist_name, r.collection_name, date))
+            })
+            .collect();
+        let (l3, mut s3) = list_with_selection(radar_items, app.dash_sel[3], app.dash_pane == 3);
+        f.render_stateful_widget(l3.block(pane_block(" Release Radar (Discovery) ", app.dash_pane == 3)), bottom[0], &mut s3);
+
+        let sim_items: Vec<ListItem> = app
+            .discovery
+            .similar_artists
+            .iter()
+            .map(|s| {
+                let mark = if s.id.is_empty() { "" } else { " [in library]" };
+                ListItem::new(format!("{} (like {}){}", s.name, s.based_on, mark))
+            })
+            .collect();
+        let (l4, mut s4) = list_with_selection(sim_items, app.dash_sel[4], app.dash_pane == 4);
+        f.render_stateful_widget(l4.block(pane_block(" Similar Artists ", app.dash_pane == 4)), bottom[1], &mut s4);
+    }
 }
 
 fn draw_library(f: &mut Frame, app: &App, area: Rect) {
