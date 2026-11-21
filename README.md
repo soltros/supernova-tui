@@ -1,24 +1,24 @@
 # supernova-tui
 
-A terminal user interface (TUI) client for the [Supernova](https://github.com/soltros/supernova) music server, built in Rust with [`ratatui`](https://ratatui.rs).
+A terminal UI client for the [Supernova](https://github.com/soltros/supernova) music server, written in Rust with [ratatui](https://ratatui.rs).
 
-`supernova-tui` is strictly a client—it connects to an existing Supernova server over HTTP(S), plays audio locally via `mpv`, and supports every core Supernova feature and server plugin.
+`supernova-tui` is a client only. It connects to a Supernova server over HTTP/HTTPS and plays audio locally with `mpv`.
 
 ## Features
 
-- **Dashboard & Discovery (`1:Home`)**: Recently added albums, recently played tracks, favorite tracks, Release Radar, and Similar Artists.
-- **Library Browser (`2:Library`)**: 3-column Artists → Albums → Tracks browser, artist letter filter, queue management, hearting, playlist assignment, and track downloads.
-- **Unified Search (`3:Search`)**: Search across artists, albums, and tracks.
+- **Dashboard & Discovery (`1:Home`)**: Recently added albums, recently played tracks, favorite tracks, Release Radar, and similar artists.
+- **Library Browser (`2:Library`)**: 3-column Artists / Albums / Tracks browser with letter filtering, queuing, hearting, playlist assignment, and track downloads.
+- **Search (`3:Search`)**: Search across artists, albums, and tracks.
 - **Playlists (`4:Playlists`)**: Create, delete, browse, play, remove tracks, and export backup JSON.
 - **Hearts (`5:Hearts`)**: Manage favorited tracks, albums, artists, and playlists, plus backup export.
-- **All Supernova Plugins Supported**:
-  - **PodcastIndex (`6:Podcasts`)**: Search podcasts, subscribe/unsubscribe, browse episodes, stream with auto-saved resume position, mark completed, and export/import OPML.
+- **Plugin Support**:
+  - **PodcastIndex (`6:Podcasts`)**: Search podcasts, subscribe/unsubscribe, browse episodes, stream with saved resume position, mark episodes completed, and export/import OPML.
   - **RadioBrowser (`7:Radio`)**: Search internet radio stations by name or `country:<CODE>`, subscribe/unsubscribe, heart stations, and stream live.
-  - **LRCLib (`8:Lyrics`)**: Live time-synced LRC lyrics highlighted in sync with `mpv` playback (with plain-lyrics fallback).
-  - **Last.fm (`9:Plugins` / `0:Settings`)**: In-app auth URL generation, token exchange, automatic Now Playing updates, and automatic scrobbling.
-  - **Subsonic, Auto-Tagger, ArtistMerger, AlbumMerger, Deduper (`9:Plugins`)**: View plugin status, test `/rest/ping`, trigger admin jobs, and inspect read-only merge/dedupe previews.
-- **In-App Settings (`0:Settings`)**: Edit server URL, switch account, change password, configure stream transcode format/bitrate, adjust default volume, manage Last.fm session, and check server health. All settings persist to `~/.config/supernova/config.json`.
-- **Smart Self-Update (`supernova-tui update`)**: Detects OS/architecture (`x86_64`/`aarch64`) and installation method (`.deb`, `.rpm`, AUR, Nix, or standalone binary) and downloads/installs the matching GitHub release asset.
+  - **LRCLib (`8:Lyrics`)**: Time-synced LRC lyrics highlighted against `mpv` playback position (falls back to plain lyrics).
+  - **Last.fm (`9:Plugins` / `0:Settings`)**: Auth URL generation, token exchange, Now Playing updates, and automatic scrobbling.
+  - **Subsonic, Auto-Tagger, ArtistMerger, AlbumMerger, Deduper (`9:Plugins`)**: Plugin status list, `/rest/ping` check, admin job triggers, and read-only merge/dedupe previews.
+- **Settings (`0:Settings`)**: Configure server URL, account login, password changes, transcode format/bitrate, default volume, Last.fm session, and server health checks. All settings are saved to `~/.config/supernova/config.json`.
+- **Self-Update (`supernova-tui update`)**: Detects your OS, CPU architecture (`x86_64`/`aarch64`), and install type (`.deb`, `.rpm`, AUR, Nix, or standalone binary) and pulls the matching release asset from GitHub.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ A terminal user interface (TUI) client for the [Supernova](https://github.com/so
 
 ## Configuration
 
-All client settings are stored in `~/.config/supernova/config.json` (with automatic fallback to `~/.config/supernova/credentials.json` if you previously logged in with `sn`).
+Client settings are stored in `~/.config/supernova/config.json`. If `config.json` does not exist yet or has no `url`/`token`, `supernova-tui` falls back to `~/.config/supernova/credentials.json` from the `sn` CLI.
 
 ```json
 {
@@ -84,7 +84,7 @@ supernova-tui --url http://localhost:8080
 
 ### Self-Update
 ```bash
-supernova-tui update --check   # Check latest release & detected package type
+supernova-tui update --check   # Check latest release and detected package type
 supernova-tui update           # Download and install matching release asset
 ```
 
@@ -92,7 +92,7 @@ supernova-tui update           # Download and install matching release asset
 
 | Key | Action |
 | --- | --- |
-| `1`–`9`, `0` | Switch tabs (`0` = Settings) |
+| `1`-`9`, `0` | Switch tabs (`0` = Settings) |
 | `Space` | Play / Pause |
 | `>` / `<` | Next / Previous track in queue |
 | `[` / `]` | Seek -10s / +10s |
