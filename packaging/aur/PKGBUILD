@@ -1,6 +1,6 @@
 # Maintainer: Derrik Diener <soltros@users.noreply.github.com>
 pkgname=supernova-tui
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Ratatui TUI client for the Supernova music server"
 arch=('x86_64' 'aarch64')

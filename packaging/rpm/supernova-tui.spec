@@ -1,5 +1,5 @@
 Name:           supernova-tui
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Ratatui TUI client for the Supernova music server
 License:        GPL-3.0-or-later

@@ -1,6 +1,6 @@
 [package]
 name = "supernova-tui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Full-featured Ratatui TUI client for the Supernova music server and all its plugins"
 
